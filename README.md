@@ -4,6 +4,12 @@ A map to show how far you are from the nearest In-N-Out Burger, color-coded by d
 
 ## Features
 
+- **Lightweight Custom Basemap**: Custom-built geographic basemap with simplified US geography
+- **Dark & Light Modes**: 
+  - 🌙 Dark mode with deep ocean and dark land colors
+  - ☀️ Light mode with bright, clear colors
+  - 🖥️ System mode automatically detects your browser preference
+  - Theme preference saved to localStorage
 - **Interactive Map**: Click anywhere on the map to see the distance and driving time to the nearest In-N-Out location
 - **Color-Coded Visualization**: Locations are color-coded based on driving time:
   - 🟢 Green: 0-30 minutes
@@ -17,14 +23,15 @@ A map to show how far you are from the nearest In-N-Out Burger, color-coded by d
 ## How to Use
 
 1. Open `index.html` in a web browser
-2. Click anywhere on the map to see:
+2. Select your preferred theme from the dropdown (System/Light/Dark)
+3. Click anywhere on the map to see:
    - Your selected coordinates
    - The nearest In-N-Out location
    - Distance in miles
    - Estimated driving time
-3. Hover over In-N-Out markers (🍔) to see location details
-4. Use the zoom controls to get a closer view
-5. Click "Reset View" to return to the default view
+4. Hover over In-N-Out markers (🍔) to see location details
+5. Use the zoom controls to get a closer view
+6. Click "Reset View" to return to the default view
 
 ## Running Locally
 
@@ -45,6 +52,10 @@ Then visit `http://localhost:8000` in your browser.
 ## Technical Details
 
 - Built with vanilla JavaScript and HTML5 Canvas
+- Custom lightweight basemap with simplified US geography (no external tile dependencies)
+- Dark and light mode themes using CSS custom properties
+- Theme detection using `prefers-color-scheme` media query
+- Theme preference persisted to localStorage
 - No external dependencies or CDN requirements
 - Uses Haversine formula for distance calculation with a 1.4x road factor
 - Assumes average highway speed of 60 mph for time estimation
