@@ -343,12 +343,13 @@ class SimpleMap {
                     
                     // Calculate nearest In-N-Out and driving time
                     const result = this.getNearestInNOut(lat, lng);
-                    if (result) {
+                    if (result && result.time < 8) {
+                        // Only draw heat map for locations within 8 hours (reasonable driving distance)
                         const color = this.getColorForTime(result.time);
                         
                         // Draw the colored rectangle with transparency
                         heatCtx.fillStyle = color;
-                        heatCtx.globalAlpha = 0.4; // Semi-transparent overlay
+                        heatCtx.globalAlpha = 0.3; // Semi-transparent overlay
                         heatCtx.fillRect(px, py, gridSize, gridSize);
                         heatCtx.globalAlpha = 1.0; // Reset alpha
                     }
@@ -605,6 +606,62 @@ class SimpleMap {
             return days + ' day' + (days > 1 ? 's' : '') + ' ' + h + ' hour' + (h > 1 ? 's' : '');
         }
     }
+    
+    searchCity(cityName) {
+        const searchButton = document.getElementById('search-button');
+        const searchResult = document.getElementById('search-result');
+        
+        // Show loading state
+        searchButton.disabled = true;
+        searchButton.textContent = 'Searching...';
+        searchResult.textContent = 'Searching for location...';
+        searchResult.className = '';
+        
+        // Normalize city name for lookup
+        const normalizedCity = cityName.toLowerCase().trim();
+        
+        // Try to find city in database
+        setTimeout(() => {
+            searchButton.disabled = false;
+            searchButton.textContent = 'Search';
+            
+            const cityData = citiesDatabase[normalizedCity];
+            
+            if (cityData) {
+                const lat = cityData.lat;
+                const lng = cityData.lng;
+                const displayName = cityData.name;
+                
+                // Find nearest In-N-Out
+                const result = this.getNearestInNOut(lat, lng);
+                
+                if (result) {
+                    // Center map on searched location
+                    this.centerLat = lat;
+                    this.centerLng = lng;
+                    
+                    // Set a click marker at this location
+                    this.clickMarker = { lat, lng, result };
+                    this.draw();
+                    
+                    // Display result
+                    searchResult.className = 'success';
+                    searchResult.innerHTML = `
+                        📍 <strong>${displayName}</strong><br>
+                        Nearest In-N-Out: <strong>${result.location.city}</strong><br>
+                        Distance: ${result.distance.toFixed(1)} miles | 
+                        Drive time: ${this.formatTime(result.time)}
+                    `;
+                } else {
+                    searchResult.className = 'error';
+                    searchResult.textContent = 'Could not calculate distance to nearest In-N-Out.';
+                }
+            } else {
+                searchResult.className = 'error';
+                searchResult.textContent = 'City not found. Try a major US city like "New York, NY" or "Los Angeles, CA".';
+            }
+        }, 300);
+    }
 }
 
 // Initialize the map when DOM is loaded
@@ -612,4 +669,26 @@ document.addEventListener('DOMContentLoaded', () => {
     window.inNOutMap = new SimpleMap('map');
     console.log('In-N-Out Desert Map loaded with', inNOutLocations.length, 'locations');
     console.log('Click anywhere on the map to see driving time to the nearest In-N-Out!');
+    
+    // Setup search functionality
+    const searchButton = document.getElementById('search-button');
+    const citySearch = document.getElementById('city-search');
+    
+    searchButton.addEventListener('click', () => {
+        const cityName = citySearch.value.trim();
+        if (cityName) {
+            window.inNOutMap.searchCity(cityName);
+        } else {
+            const searchResult = document.getElementById('search-result');
+            searchResult.className = 'error';
+            searchResult.textContent = 'Please enter a city name.';
+        }
+    });
+    
+    // Allow Enter key to trigger search
+    citySearch.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+            searchButton.click();
+        }
+    });
 });
