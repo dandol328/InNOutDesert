@@ -343,12 +343,13 @@ class SimpleMap {
                     
                     // Calculate nearest In-N-Out and driving time
                     const result = this.getNearestInNOut(lat, lng);
-                    if (result) {
+                    if (result && result.time < 8) {
+                        // Only draw heat map for locations within 8 hours (reasonable driving distance)
                         const color = this.getColorForTime(result.time);
                         
                         // Draw the colored rectangle with transparency
                         heatCtx.fillStyle = color;
-                        heatCtx.globalAlpha = 0.4; // Semi-transparent overlay
+                        heatCtx.globalAlpha = 0.3; // Semi-transparent overlay
                         heatCtx.fillRect(px, py, gridSize, gridSize);
                         heatCtx.globalAlpha = 1.0; // Reset alpha
                     }
