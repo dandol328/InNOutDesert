@@ -48,453 +48,228 @@ class ThemeManager {
     }
 }
 
-// Lightweight tile-based map implementation
-class SimpleMap {
+// Leaflet-based map implementation with heat map overlay
+class LeafletMap {
     constructor(containerId) {
         this.container = document.getElementById(containerId);
-        this.canvas = document.createElement('canvas');
-        this.ctx = this.canvas.getContext('2d');
-        this.container.appendChild(this.canvas);
-        
         this.tooltip = document.getElementById('tooltip');
         this.themeManager = new ThemeManager();
         
-        // Map state
-        this.centerLat = 37.0902;
-        this.centerLng = -95.7129;
-        this.zoom = 5;
-        this.tileSize = 256; // Keep this for coordinate calculations
-        
-        // Dragging state
-        this.isDragging = false;
-        this.lastX = 0;
-        this.lastY = 0;
-        
         // Click marker
         this.clickMarker = null;
+        this.clickCircle = null;
+        this.clickLine = null;
         
-        // Cache for heat map to improve performance
-        this.heatMapCache = null;
-        this.lastZoom = null;
-        this.lastCenterLat = null;
-        this.lastCenterLng = null;
+        // Initialize Leaflet map
+        this.map = L.map(containerId, {
+            center: [37.0902, -95.7129],
+            zoom: 5,
+            zoomControl: false // We'll use custom controls
+        });
         
-        this.resize();
+        // Add tile layer based on theme
+        this.updateTileLayer();
+        
+        // Create a canvas overlay for heat map
+        this.createHeatMapLayer();
+        
+        // Add In-N-Out location markers
+        this.addLocationMarkers();
+        
+        // Setup event listeners
         this.setupEventListeners();
-        this.draw();
-    }
-    
-    resize() {
-        this.canvas.width = this.canvas.clientWidth;
-        this.canvas.height = this.canvas.clientHeight;
-        // Invalidate heat map cache on resize
-        this.heatMapCache = null;
-        this.draw();
-    }
-    
-    setupEventListeners() {
-        window.addEventListener('resize', () => this.resize());
         
-        // Mouse events
-        this.canvas.addEventListener('mousedown', (e) => {
-            this.isDragging = true;
-            this.lastX = e.clientX;
-            this.lastY = e.clientY;
-            this.canvas.style.cursor = 'grabbing';
-        });
-        
-        this.canvas.addEventListener('mousemove', (e) => {
-            if (this.isDragging) {
-                const dx = e.clientX - this.lastX;
-                const dy = e.clientY - this.lastY;
-                
-                // Update center based on drag
-                const scale = this.getScale();
-                this.centerLng -= dx / scale;
-                this.centerLat += dy / scale;
-                
-                this.lastX = e.clientX;
-                this.lastY = e.clientY;
-                this.draw();
-            } else {
-                // Check hover over markers
-                this.handleMouseMove(e);
-            }
-        });
-        
-        this.canvas.addEventListener('mouseup', () => {
-            this.isDragging = false;
-            this.canvas.style.cursor = 'default';
-        });
-        
-        this.canvas.addEventListener('mouseleave', () => {
-            this.isDragging = false;
-            this.canvas.style.cursor = 'default';
-            this.tooltip.style.display = 'none';
-        });
-        
-        this.canvas.addEventListener('click', (e) => {
-            if (!this.isDragging) {
-                this.handleClick(e);
-            }
-        });
-        
-        // Wheel zoom
-        this.canvas.addEventListener('wheel', (e) => {
-            e.preventDefault();
-            const zoomDelta = e.deltaY > 0 ? -0.5 : 0.5;
-            this.zoom = Math.max(3, Math.min(10, this.zoom + zoomDelta));
-            this.draw();
-        });
-        
-        // Zoom controls
+        // Disable default Leaflet zoom controls (we have custom ones)
         document.getElementById('zoom-in').addEventListener('click', () => {
-            this.zoom = Math.min(10, this.zoom + 1);
-            this.draw();
+            this.map.zoomIn();
         });
         
         document.getElementById('zoom-out').addEventListener('click', () => {
-            this.zoom = Math.max(3, this.zoom - 1);
-            this.draw();
+            this.map.zoomOut();
         });
         
         document.getElementById('reset').addEventListener('click', () => {
-            this.centerLat = 37.0902;
-            this.centerLng = -95.7129;
-            this.zoom = 5;
-            this.clickMarker = null;
-            this.draw();
+            this.map.setView([37.0902, -95.7129], 5);
+            this.clearClickMarker();
         });
     }
     
-    getScale() {
-        return this.tileSize * Math.pow(2, this.zoom) / 360;
+    updateTileLayer() {
+        // Remove existing tile layer if present
+        if (this.tileLayer) {
+            this.map.removeLayer(this.tileLayer);
+        }
+        
+        const theme = this.themeManager.getEffectiveTheme();
+        
+        // Choose tile provider based on theme
+        if (theme === 'dark') {
+            // Use CartoDB Dark Matter for dark theme
+            this.tileLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+                subdomains: 'abcd',
+                maxZoom: 20
+            });
+        } else {
+            // Use OpenStreetMap for light theme
+            this.tileLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+                maxZoom: 19
+            });
+        }
+        
+        this.tileLayer.addTo(this.map);
+        
+        // Redraw heat map with new theme
+        if (this.heatMapLayer) {
+            this.drawHeatMap();
+        }
     }
     
-    latLngToPixel(lat, lng) {
-        const scale = this.getScale();
+    createHeatMapLayer() {
+        // Create a canvas overlay for the heat map
+        this.heatMapLayer = L.gridLayer({
+            attribution: '',
+            tileSize: 256,
+            opacity: 0.3
+        });
         
-        // Convert to Web Mercator
-        const x = (lng + 180) * scale;
-        const latRad = lat * Math.PI / 180;
-        const mercN = Math.log(Math.tan(Math.PI / 4 + latRad / 2));
-        const y = (180 - mercN * 180 / Math.PI) * scale;
-        
-        // Offset by center
-        const centerX = (this.centerLng + 180) * scale;
-        const centerLatRad = this.centerLat * Math.PI / 180;
-        const centerMercN = Math.log(Math.tan(Math.PI / 4 + centerLatRad / 2));
-        const centerY = (180 - centerMercN * 180 / Math.PI) * scale;
-        
-        return {
-            x: this.canvas.width / 2 + (x - centerX),
-            y: this.canvas.height / 2 + (y - centerY)
+        this.heatMapLayer.createTile = (coords) => {
+            const tile = document.createElement('canvas');
+            const ctx = tile.getContext('2d');
+            tile.width = 256;
+            tile.height = 256;
+            
+            // Calculate the bounds of this tile
+            const tileBounds = this._tileToBounds(coords);
+            
+            // Draw heat map for this tile
+            this._drawTileHeatMap(ctx, tileBounds, coords.z);
+            
+            return tile;
         };
+        
+        this.heatMapLayer.addTo(this.map);
     }
     
-    pixelToLatLng(px, py) {
-        const scale = this.getScale();
+    _tileToBounds(coords) {
+        const nwPoint = [coords.x * 256, coords.y * 256];
+        const sePoint = [(coords.x + 1) * 256, (coords.y + 1) * 256];
         
-        // Calculate center in pixels
-        const centerX = (this.centerLng + 180) * scale;
-        const centerLatRad = this.centerLat * Math.PI / 180;
-        const centerMercN = Math.log(Math.tan(Math.PI / 4 + centerLatRad / 2));
-        const centerY = (180 - centerMercN * 180 / Math.PI) * scale;
+        const nw = this.map.unproject(nwPoint, coords.z);
+        const se = this.map.unproject(sePoint, coords.z);
         
-        // Calculate clicked point
-        const x = centerX + (px - this.canvas.width / 2);
-        const y = centerY + (py - this.canvas.height / 2);
+        return L.latLngBounds(se, nw);
+    }
+    
+    _drawTileHeatMap(ctx, bounds, zoom) {
+        // Draw heat map for this tile
+        const gridSize = 32; // pixels per grid cell
+        const numCols = Math.ceil(256 / gridSize);
+        const numRows = Math.ceil(256 / gridSize);
         
-        const lng = (x / scale) - 180;
-        const mercN = (180 - y / scale) * Math.PI / 180;
-        const lat = (Math.atan(Math.exp(mercN)) - Math.PI / 4) * 2 * 180 / Math.PI;
-        
+        for (let row = 0; row < numRows; row++) {
+            for (let col = 0; col < numCols; col++) {
+                const px = col * gridSize;
+                const py = row * gridSize;
+                
+                // Calculate lat/lng for center of this grid cell
+                const centerPx = px + gridSize / 2;
+                const centerPy = py + gridSize / 2;
+                
+                // Convert tile pixel to lat/lng
+                const latLng = this._tilePixelToLatLng(centerPx, centerPy, bounds);
+                
+                // Calculate nearest In-N-Out and driving time
+                const result = this.getNearestInNOut(latLng.lat, latLng.lng);
+                if (result && result.time < 8) {
+                    const color = this.getColorForTime(result.time);
+                    ctx.fillStyle = color;
+                    ctx.fillRect(px, py, gridSize, gridSize);
+                }
+            }
+        }
+    }
+    
+    _tilePixelToLatLng(px, py, bounds) {
+        const lat = bounds.getNorth() - (py / 256) * (bounds.getNorth() - bounds.getSouth());
+        const lng = bounds.getWest() + (px / 256) * (bounds.getEast() - bounds.getWest());
         return { lat, lng };
     }
     
-    draw() {
-        // Clear canvas
-        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-        
-        // Draw background (ocean/water color)
-        const bgColor = this.themeManager.tileStyle === 'dark' ? '#0a1929' : '#a5c4d4';
-        this.ctx.fillStyle = bgColor;
-        this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
-        
-        // Draw land mass (basemap)
-        this.drawLandMass();
-        
-        // Draw heat map (color-coded driving time overlay)
-        this.drawHeatMap();
-        
-        // Draw grid
-        this.drawGrid();
-        
-        // Draw state outlines
-        this.drawStateOutlines();
-        
-        // Draw In-N-Out locations
-        this.drawLocations();
-        
-        // Draw click marker if exists
-        if (this.clickMarker) {
-            this.drawClickMarker();
-        }
-    }
-    
-    drawLandMass() {
-        // Draw USA land mass as a simplified polygon
-        const landColor = this.themeManager.tileStyle === 'dark' ? '#1e1e1e' : '#e8e6e1';
-        this.ctx.fillStyle = landColor;
-        
-        // Simplified US mainland boundary
-        const usMainland = [
-            { lat: 49, lng: -125 }, // Northwest
-            { lat: 49, lng: -95 },  // North central
-            { lat: 49, lng: -67 },  // Northeast
-            { lat: 45, lng: -67 },  // Maine
-            { lat: 41, lng: -70 },  // Cape Cod
-            { lat: 40, lng: -74 },  // NYC area
-            { lat: 37, lng: -76 },  // Chesapeake
-            { lat: 33, lng: -78 },  // Carolina coast
-            { lat: 30, lng: -81 },  // Florida
-            { lat: 25, lng: -80 },  // South Florida
-            { lat: 25, lng: -81 },  // Florida Keys
-            { lat: 28, lng: -83 },  // Tampa
-            { lat: 30, lng: -84 },  // Panhandle
-            { lat: 30, lng: -88 },  // Gulf coast
-            { lat: 29, lng: -95 },  // Houston
-            { lat: 26, lng: -97 },  // South Texas
-            { lat: 32, lng: -117 }, // San Diego
-            { lat: 34, lng: -120 }, // Santa Barbara
-            { lat: 38, lng: -123 }, // San Francisco
-            { lat: 42, lng: -124 }, // Oregon
-            { lat: 48, lng: -125 }, // Washington
-        ];
-        
-        this.ctx.beginPath();
-        const firstPoint = this.latLngToPixel(usMainland[0].lat, usMainland[0].lng);
-        this.ctx.moveTo(firstPoint.x, firstPoint.y);
-        
-        for (let i = 1; i < usMainland.length; i++) {
-            const point = this.latLngToPixel(usMainland[i].lat, usMainland[i].lng);
-            this.ctx.lineTo(point.x, point.y);
-        }
-        
-        this.ctx.closePath();
-        this.ctx.fill();
-        
-        // Draw Alaska (simplified)
-        const alaskaColor = this.themeManager.tileStyle === 'dark' ? '#2a2a2a' : '#f0f0f0';
-        this.ctx.fillStyle = alaskaColor;
-        const alaska = [
-            { lat: 71, lng: -156 },
-            { lat: 71, lng: -141 },
-            { lat: 60, lng: -141 },
-            { lat: 55, lng: -130 },
-            { lat: 60, lng: -165 },
-        ];
-        
-        this.ctx.beginPath();
-        const alaskaFirst = this.latLngToPixel(alaska[0].lat, alaska[0].lng);
-        this.ctx.moveTo(alaskaFirst.x, alaskaFirst.y);
-        
-        for (let i = 1; i < alaska.length; i++) {
-            const point = this.latLngToPixel(alaska[i].lat, alaska[i].lng);
-            this.ctx.lineTo(point.x, point.y);
-        }
-        
-        this.ctx.closePath();
-        this.ctx.fill();
-    }
-    
     drawHeatMap() {
-        // Check if we need to regenerate the heat map
-        const needsRegeneration = !this.heatMapCache || 
-                                  this.zoom !== this.lastZoom || 
-                                  this.centerLat !== this.lastCenterLat || 
-                                  this.centerLng !== this.lastCenterLng ||
-                                  this.heatMapCache.width !== this.canvas.width ||
-                                  this.heatMapCache.height !== this.canvas.height;
-        
-        if (needsRegeneration) {
-            // Create a grid of pixels and calculate driving time for each
-            // Use a lower resolution grid for performance
-            const gridSize = 25; // pixels per grid cell (smaller = smoother)
-            const numCols = Math.ceil(this.canvas.width / gridSize);
-            const numRows = Math.ceil(this.canvas.height / gridSize);
-            
-            // Create an offscreen canvas for the heat map
-            this.heatMapCache = document.createElement('canvas');
-            this.heatMapCache.width = this.canvas.width;
-            this.heatMapCache.height = this.canvas.height;
-            const heatCtx = this.heatMapCache.getContext('2d');
-            
-            // Draw colored rectangles for each grid cell
-            for (let row = 0; row < numRows; row++) {
-                for (let col = 0; col < numCols; col++) {
-                    const px = col * gridSize;
-                    const py = row * gridSize;
-                    
-                    // Get the lat/lng for the center of this grid cell
-                    const centerPx = px + gridSize / 2;
-                    const centerPy = py + gridSize / 2;
-                    const { lat, lng } = this.pixelToLatLng(centerPx, centerPy);
-                    
-                    // Calculate nearest In-N-Out and driving time
-                    const result = this.getNearestInNOut(lat, lng);
-                    if (result && result.time < 8) {
-                        // Only draw heat map for locations within 8 hours (reasonable driving distance)
-                        const color = this.getColorForTime(result.time);
-                        
-                        // Draw the colored rectangle with transparency
-                        heatCtx.fillStyle = color;
-                        heatCtx.globalAlpha = 0.3; // Semi-transparent overlay
-                        heatCtx.fillRect(px, py, gridSize, gridSize);
-                        heatCtx.globalAlpha = 1.0; // Reset alpha
-                    }
-                }
-            }
-            
-            // Store current state
-            this.lastZoom = this.zoom;
-            this.lastCenterLat = this.centerLat;
-            this.lastCenterLng = this.centerLng;
-        }
-        
-        // Draw the cached heat map
-        this.ctx.drawImage(this.heatMapCache, 0, 0);
-    }
-    
-    drawGrid() {
-        const gridColor = this.themeManager.tileStyle === 'dark' ? '#333333' : '#d0d0d0';
-        this.ctx.strokeStyle = gridColor;
-        this.ctx.lineWidth = 0.5;
-        
-        // Draw latitude lines every 5 degrees
-        for (let lat = 25; lat <= 50; lat += 5) {
-            this.ctx.beginPath();
-            const startX = this.latLngToPixel(lat, -125);
-            const endX = this.latLngToPixel(lat, -65);
-            this.ctx.moveTo(startX.x, startX.y);
-            this.ctx.lineTo(endX.x, endX.y);
-            this.ctx.stroke();
-        }
-        
-        // Draw longitude lines every 10 degrees
-        for (let lng = -120; lng <= -70; lng += 10) {
-            this.ctx.beginPath();
-            const startY = this.latLngToPixel(50, lng);
-            const endY = this.latLngToPixel(24, lng);
-            this.ctx.moveTo(startY.x, startY.y);
-            this.ctx.lineTo(endY.x, endY.y);
-            this.ctx.stroke();
+        // Trigger redraw of heat map layer
+        if (this.heatMapLayer) {
+            this.map.removeLayer(this.heatMapLayer);
+            this.createHeatMapLayer();
         }
     }
     
-    drawStateOutlines() {
-        const outlineColor = this.themeManager.tileStyle === 'dark' ? '#555555' : '#999999';
-        this.ctx.strokeStyle = outlineColor;
-        this.ctx.lineWidth = 1;
-        
-        // Draw major state boundaries (simplified)
-        const stateBorders = [
-            // California-Nevada
-            [{ lat: 42, lng: -120 }, { lat: 35, lng: -114.6 }],
-            // Nevada-Arizona
-            [{ lat: 37, lng: -114 }, { lat: 35, lng: -114 }],
-            // Arizona-New Mexico
-            [{ lat: 37, lng: -109 }, { lat: 31.5, lng: -109 }],
-            // Texas-New Mexico
-            [{ lat: 37, lng: -103 }, { lat: 32, lng: -103 }],
-            // Colorado boundaries
-            [{ lat: 41, lng: -109 }, { lat: 37, lng: -109 }],
-            [{ lat: 41, lng: -102 }, { lat: 37, lng: -102 }],
-        ];
-        
-        stateBorders.forEach(border => {
-            this.ctx.beginPath();
-            const start = this.latLngToPixel(border[0].lat, border[0].lng);
-            const end = this.latLngToPixel(border[1].lat, border[1].lng);
-            this.ctx.moveTo(start.x, start.y);
-            this.ctx.lineTo(end.x, end.y);
-            this.ctx.stroke();
+    addLocationMarkers() {
+        // Create custom icon for In-N-Out locations
+        const inNOutIcon = L.divIcon({
+            className: 'innout-marker',
+            html: '<div style="background: #c8102e; border: 2px solid white; border-radius: 50%; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; font-size: 16px;">🍔</div>',
+            iconSize: [24, 24],
+            iconAnchor: [12, 12]
         });
-    }
-    
-    
-    drawLocations() {
+        
         inNOutLocations.forEach(location => {
-            const pos = this.latLngToPixel(location.lat, location.lng);
-            
-            // Only draw if on screen
-            if (pos.x >= -20 && pos.x <= this.canvas.width + 20 &&
-                pos.y >= -20 && pos.y <= this.canvas.height + 20) {
-                
-                // Draw pin background
-                this.ctx.fillStyle = '#c8102e';
-                this.ctx.strokeStyle = 'white';
-                this.ctx.lineWidth = 2;
-                
-                this.ctx.beginPath();
-                this.ctx.arc(pos.x, pos.y, 8, 0, Math.PI * 2);
-                this.ctx.fill();
-                this.ctx.stroke();
-                
-                // Draw burger emoji
-                this.ctx.font = '16px Arial';
-                this.ctx.textAlign = 'center';
-                this.ctx.textBaseline = 'middle';
-                this.ctx.fillText('🍔', pos.x, pos.y);
-            }
+            const marker = L.marker([location.lat, location.lng], { icon: inNOutIcon })
+                .addTo(this.map)
+                .bindTooltip(`<strong>In-N-Out Burger</strong><br>${location.city}`, {
+                    direction: 'top',
+                    offset: [0, -12]
+                });
         });
     }
     
-    drawClickMarker() {
-        const pos = this.latLngToPixel(this.clickMarker.lat, this.clickMarker.lng);
-        const color = this.getColorForTime(this.clickMarker.result.time);
+    setupEventListeners() {
+        // Click event on map
+        this.map.on('click', (e) => {
+            this.handleMapClick(e);
+        });
         
-        // Draw marker
-        this.ctx.fillStyle = color;
-        this.ctx.strokeStyle = 'white';
-        this.ctx.lineWidth = 3;
+        // Zoom event to redraw heat map
+        this.map.on('zoomend', () => {
+            this.drawHeatMap();
+        });
         
-        this.ctx.beginPath();
-        this.ctx.arc(pos.x, pos.y, 10, 0, Math.PI * 2);
-        this.ctx.fill();
-        this.ctx.stroke();
-        
-        // Draw line to nearest location
-        const nearestPos = this.latLngToPixel(
-            this.clickMarker.result.location.lat,
-            this.clickMarker.result.location.lng
-        );
-        
-        this.ctx.strokeStyle = color;
-        this.ctx.lineWidth = 2;
-        this.ctx.setLineDash([10, 5]);
-        
-        this.ctx.beginPath();
-        this.ctx.moveTo(pos.x, pos.y);
-        this.ctx.lineTo(nearestPos.x, nearestPos.y);
-        this.ctx.stroke();
-        
-        this.ctx.setLineDash([]);
+        // Move event to redraw heat map
+        this.map.on('moveend', () => {
+            this.drawHeatMap();
+        });
     }
     
-    handleClick(e) {
-        const rect = this.canvas.getBoundingClientRect();
-        const px = e.clientX - rect.left;
-        const py = e.clientY - rect.top;
-        
-        const { lat, lng } = this.pixelToLatLng(px, py);
+    handleMapClick(e) {
+        const lat = e.latlng.lat;
+        const lng = e.latlng.lng;
         
         // Find nearest In-N-Out
         const result = this.getNearestInNOut(lat, lng);
         
         if (result) {
-            this.clickMarker = { lat, lng, result };
-            this.draw();
+            this.clearClickMarker();
+            
+            // Create click marker
+            const color = this.getColorForTime(result.time);
+            this.clickMarker = L.circleMarker([lat, lng], {
+                radius: 10,
+                fillColor: color,
+                fillOpacity: 1,
+                color: 'white',
+                weight: 3
+            }).addTo(this.map);
+            
+            // Draw line to nearest location
+            this.clickLine = L.polyline([
+                [lat, lng],
+                [result.location.lat, result.location.lng]
+            ], {
+                color: color,
+                weight: 2,
+                dashArray: '10, 5'
+            }).addTo(this.map);
             
             // Show tooltip
             const html = `
@@ -508,42 +283,27 @@ class SimpleMap {
             `;
             
             this.tooltip.innerHTML = html;
-            this.tooltip.style.left = (e.clientX + 15) + 'px';
-            this.tooltip.style.top = (e.clientY + 15) + 'px';
+            this.tooltip.style.left = (e.originalEvent.clientX + 15) + 'px';
+            this.tooltip.style.top = (e.originalEvent.clientY + 15) + 'px';
             this.tooltip.style.display = 'block';
         }
     }
     
-    handleMouseMove(e) {
-        const rect = this.canvas.getBoundingClientRect();
-        const px = e.clientX - rect.left;
-        const py = e.clientY - rect.top;
-        
-        // Check if hovering over a location
-        for (const location of inNOutLocations) {
-            const pos = this.latLngToPixel(location.lat, location.lng);
-            const dist = Math.sqrt((px - pos.x) ** 2 + (py - pos.y) ** 2);
-            
-            if (dist < 15) {
-                this.canvas.style.cursor = 'pointer';
-                this.tooltip.innerHTML = `<strong>In-N-Out Burger</strong><br>${location.city}`;
-                this.tooltip.style.left = (e.clientX + 15) + 'px';
-                this.tooltip.style.top = (e.clientY + 15) + 'px';
-                this.tooltip.style.display = 'block';
-                return;
-            }
+    clearClickMarker() {
+        if (this.clickMarker) {
+            this.map.removeLayer(this.clickMarker);
+            this.clickMarker = null;
         }
-        
-        // Only hide tooltip if not showing click result
-        if (!this.clickMarker) {
-            this.tooltip.style.display = 'none';
+        if (this.clickLine) {
+            this.map.removeLayer(this.clickLine);
+            this.clickLine = null;
         }
-        this.canvas.style.cursor = 'default';
+        this.tooltip.style.display = 'none';
     }
     
     updateTheme(theme) {
-        // Redraw with new theme colors
-        this.draw();
+        // Update tile layer for new theme
+        this.updateTileLayer();
     }
     
     calculateDrivingDistance(lat1, lng1, lat2, lng2) {
@@ -637,12 +397,30 @@ class SimpleMap {
                 
                 if (result) {
                     // Center map on searched location
-                    this.centerLat = lat;
-                    this.centerLng = lng;
+                    this.map.setView([lat, lng], 8);
                     
-                    // Set a click marker at this location
-                    this.clickMarker = { lat, lng, result };
-                    this.draw();
+                    // Clear previous click marker
+                    this.clearClickMarker();
+                    
+                    // Create click marker at this location
+                    const color = this.getColorForTime(result.time);
+                    this.clickMarker = L.circleMarker([lat, lng], {
+                        radius: 10,
+                        fillColor: color,
+                        fillOpacity: 1,
+                        color: 'white',
+                        weight: 3
+                    }).addTo(this.map);
+                    
+                    // Draw line to nearest location
+                    this.clickLine = L.polyline([
+                        [lat, lng],
+                        [result.location.lat, result.location.lng]
+                    ], {
+                        color: color,
+                        weight: 2,
+                        dashArray: '10, 5'
+                    }).addTo(this.map);
                     
                     // Display result
                     searchResult.className = 'success';
@@ -666,7 +444,7 @@ class SimpleMap {
 
 // Initialize the map when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
-    window.inNOutMap = new SimpleMap('map');
+    window.inNOutMap = new LeafletMap('map');
     console.log('In-N-Out Desert Map loaded with', inNOutLocations.length, 'locations');
     console.log('Click anywhere on the map to see driving time to the nearest In-N-Out!');
     
