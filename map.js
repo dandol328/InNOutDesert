@@ -15,6 +15,12 @@ class SimpleMap {
         this.offsetX = 0;
         this.offsetY = 0;
         
+        // Cache for heat map to improve performance
+        this.heatMapCache = null;
+        this.lastZoom = 1;
+        this.lastOffsetX = 0;
+        this.lastOffsetY = 0;
+        
         this.resize();
         this.setupEventListeners();
         this.draw();
@@ -23,6 +29,8 @@ class SimpleMap {
     resize() {
         this.canvas.width = this.canvas.clientWidth;
         this.canvas.height = this.canvas.clientHeight;
+        // Invalidate heat map cache on resize
+        this.heatMapCache = null;
         this.draw();
     }
     
@@ -115,6 +123,9 @@ class SimpleMap {
         this.ctx.fillStyle = '#e8f4f8';
         this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
         
+        // Draw heat map (color-coded driving time overlay)
+        this.drawHeatMap();
+        
         // Draw grid
         this.drawGrid();
         
@@ -123,6 +134,63 @@ class SimpleMap {
         
         // Draw In-N-Out locations
         this.drawLocations();
+    }
+    
+    drawHeatMap() {
+        // Check if we need to regenerate the heat map
+        const needsRegeneration = !this.heatMapCache || 
+                                  this.zoom !== this.lastZoom || 
+                                  this.offsetX !== this.lastOffsetX || 
+                                  this.offsetY !== this.lastOffsetY ||
+                                  this.heatMapCache.width !== this.canvas.width ||
+                                  this.heatMapCache.height !== this.canvas.height;
+        
+        if (needsRegeneration) {
+            // Create a grid of pixels and calculate driving time for each
+            // Use a lower resolution grid for performance
+            const gridSize = 25; // pixels per grid cell (smaller = smoother)
+            const numCols = Math.ceil(this.canvas.width / gridSize);
+            const numRows = Math.ceil(this.canvas.height / gridSize);
+            
+            // Create an offscreen canvas for the heat map
+            this.heatMapCache = document.createElement('canvas');
+            this.heatMapCache.width = this.canvas.width;
+            this.heatMapCache.height = this.canvas.height;
+            const heatCtx = this.heatMapCache.getContext('2d');
+            
+            // Draw colored rectangles for each grid cell
+            for (let row = 0; row < numRows; row++) {
+                for (let col = 0; col < numCols; col++) {
+                    const px = col * gridSize;
+                    const py = row * gridSize;
+                    
+                    // Get the lat/lng for the center of this grid cell
+                    const centerPx = px + gridSize / 2;
+                    const centerPy = py + gridSize / 2;
+                    const { lat, lng } = this.pixelToLatLng(centerPx, centerPy);
+                    
+                    // Calculate nearest In-N-Out and driving time
+                    const result = this.getNearestInNOut(lat, lng);
+                    if (result) {
+                        const color = this.getColorForTime(result.time);
+                        
+                        // Draw the colored rectangle with transparency
+                        heatCtx.fillStyle = color;
+                        heatCtx.globalAlpha = 0.4; // Semi-transparent overlay
+                        heatCtx.fillRect(px, py, gridSize, gridSize);
+                        heatCtx.globalAlpha = 1.0; // Reset alpha
+                    }
+                }
+            }
+            
+            // Store current state
+            this.lastZoom = this.zoom;
+            this.lastOffsetX = this.offsetX;
+            this.lastOffsetY = this.offsetY;
+        }
+        
+        // Draw the cached heat map
+        this.ctx.drawImage(this.heatMapCache, 0, 0);
     }
     
     drawGrid() {
