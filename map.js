@@ -111,8 +111,11 @@ class SimpleMap {
         // Clear canvas
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
         
+        // Determine if dark mode is active
+        const isDarkMode = document.body.classList.contains('dark-mode');
+        
         // Draw background
-        this.ctx.fillStyle = '#e8f4f8';
+        this.ctx.fillStyle = isDarkMode ? '#2a2a2a' : '#e8f4f8';
         this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
         
         // Draw grid
@@ -126,7 +129,8 @@ class SimpleMap {
     }
     
     drawGrid() {
-        this.ctx.strokeStyle = '#d0d0d0';
+        const isDarkMode = document.body.classList.contains('dark-mode');
+        this.ctx.strokeStyle = isDarkMode ? '#444' : '#d0d0d0';
         this.ctx.lineWidth = 0.5;
         
         // Latitude lines
@@ -154,7 +158,8 @@ class SimpleMap {
     
     drawStateBorders() {
         // Simplified US outline
-        this.ctx.strokeStyle = '#999';
+        const isDarkMode = document.body.classList.contains('dark-mode');
+        this.ctx.strokeStyle = isDarkMode ? '#666' : '#999';
         this.ctx.lineWidth = 1;
         
         // Draw a simple border around the map area
@@ -351,4 +356,53 @@ document.addEventListener('DOMContentLoaded', () => {
     const map = new SimpleMap('map-canvas');
     console.log('In-N-Out Desert Map loaded with', inNOutLocations.length, 'locations');
     console.log('Click anywhere on the map to see driving time to the nearest In-N-Out!');
+    
+    // Theme management
+    const themeButtons = document.querySelectorAll('.theme-btn');
+    const savedTheme = localStorage.getItem('theme') || 'system';
+    
+    function applyTheme(theme) {
+        // Remove existing theme class
+        document.body.classList.remove('dark-mode');
+        
+        if (theme === 'dark') {
+            document.body.classList.add('dark-mode');
+        } else if (theme === 'light') {
+            // Light mode is default, no class needed
+        } else if (theme === 'system') {
+            // Check system preference
+            const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+            if (prefersDark) {
+                document.body.classList.add('dark-mode');
+            }
+        }
+        
+        // Update active button
+        themeButtons.forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.theme === theme);
+        });
+        
+        // Redraw the map with new theme
+        map.draw();
+    }
+    
+    // Apply saved theme on load
+    applyTheme(savedTheme);
+    
+    // Add click handlers for theme buttons
+    themeButtons.forEach(btn => {
+        btn.addEventListener('click', () => {
+            const theme = btn.dataset.theme;
+            localStorage.setItem('theme', theme);
+            applyTheme(theme);
+        });
+    });
+    
+    // Listen for system theme changes when in system mode
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
+        const currentTheme = localStorage.getItem('theme') || 'system';
+        if (currentTheme === 'system') {
+            applyTheme('system');
+        }
+    });
 });
