@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>In-N-Out Desert - Distance to Nearest Location</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div id="header">
+        <h1>🍔 In-N-Out Desert</h1>
+        <p>See how far you are from the nearest In-N-Out Burger</p>
+    </div>
+    
+    <div id="map-container">
+        <canvas id="map-canvas"></canvas>
+        <div id="tooltip"></div>
+    </div>
+    
+    <div id="legend">
+        <h3>Driving Time to Nearest In-N-Out</h3>
+        <div class="legend-item">
+            <span class="legend-color" style="background: #00ff00;"></span>
+            <span>0-30 min</span>
+        </div>
+        <div class="legend-item">
+            <span class="legend-color" style="background: #80ff00;"></span>
+            <span>30-60 min</span>
+        </div>
+        <div class="legend-item">
+            <span class="legend-color" style="background: #ffff00;"></span>
+            <span>1-2 hours</span>
+        </div>
+        <div class="legend-item">
+            <span class="legend-color" style="background: #ff8000;"></span>
+            <span>2-4 hours</span>
+        </div>
+        <div class="legend-item">
+            <span class="legend-color" style="background: #ff0000;"></span>
+            <span>4+ hours</span>
+        </div>
+    </div>
+    
+    <div id="controls">
+        <button id="zoom-in">+</button>
+        <button id="zoom-out">−</button>
+        <button id="reset">Reset View</button>
+    </div>
+    
+    <div id="info">
+        <p>Click on the map to see the driving time to the nearest In-N-Out location</p>
+    </div>
+    
+    <script src="locations.js"></script>
+    <script src="map.js"></script>
+</body>
+</html>
