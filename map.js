@@ -75,9 +75,9 @@ class SimpleMap {
         
         // Cache for heat map to improve performance
         this.heatMapCache = null;
-        this.lastZoom = 1;
-        this.lastOffsetX = 0;
-        this.lastOffsetY = 0;
+        this.lastZoom = null;
+        this.lastCenterLat = null;
+        this.lastCenterLng = null;
         
         this.resize();
         this.setupEventListeners();
@@ -221,6 +221,9 @@ class SimpleMap {
         this.ctx.fillStyle = bgColor;
         this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
         
+        // Draw land mass (basemap)
+        this.drawLandMass();
+        
         // Draw heat map (color-coded driving time overlay)
         this.drawHeatMap();
         
@@ -309,8 +312,8 @@ class SimpleMap {
         // Check if we need to regenerate the heat map
         const needsRegeneration = !this.heatMapCache || 
                                   this.zoom !== this.lastZoom || 
-                                  this.offsetX !== this.lastOffsetX || 
-                                  this.offsetY !== this.lastOffsetY ||
+                                  this.centerLat !== this.lastCenterLat || 
+                                  this.centerLng !== this.lastCenterLng ||
                                   this.heatMapCache.width !== this.canvas.width ||
                                   this.heatMapCache.height !== this.canvas.height;
         
@@ -354,8 +357,8 @@ class SimpleMap {
             
             // Store current state
             this.lastZoom = this.zoom;
-            this.lastOffsetX = this.offsetX;
-            this.lastOffsetY = this.offsetY;
+            this.lastCenterLat = this.centerLat;
+            this.lastCenterLng = this.centerLng;
         }
         
         // Draw the cached heat map
