@@ -1,19 +1,77 @@
-// Custom map implementation using Canvas
+// Theme management
+class ThemeManager {
+    constructor() {
+        this.currentTheme = localStorage.getItem('theme') || 'system';
+        this.tileStyle = 'light';
+        this.init();
+    }
+
+    init() {
+        // Set initial theme
+        this.applyTheme();
+        
+        // Listen for theme selector changes
+        const themeToggle = document.getElementById('theme-toggle');
+        themeToggle.value = this.currentTheme;
+        themeToggle.addEventListener('change', (e) => {
+            this.currentTheme = e.target.value;
+            localStorage.setItem('theme', this.currentTheme);
+            this.applyTheme();
+            // Notify map to redraw with new theme
+            if (window.inNOutMap) {
+                window.inNOutMap.updateTheme(this.getEffectiveTheme());
+            }
+        });
+
+        // Listen for system theme changes
+        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+            if (this.currentTheme === 'system') {
+                this.applyTheme();
+                if (window.inNOutMap) {
+                    window.inNOutMap.updateTheme(this.getEffectiveTheme());
+                }
+            }
+        });
+    }
+
+    getEffectiveTheme() {
+        if (this.currentTheme === 'system') {
+            return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        }
+        return this.currentTheme;
+    }
+
+    applyTheme() {
+        const theme = this.getEffectiveTheme();
+        document.body.setAttribute('data-theme', theme);
+        this.tileStyle = theme;
+    }
+}
+
+// Lightweight tile-based map implementation
 class SimpleMap {
-    constructor(canvasId) {
-        this.canvas = document.getElementById(canvasId);
+    constructor(containerId) {
+        this.container = document.getElementById(containerId);
+        this.canvas = document.createElement('canvas');
         this.ctx = this.canvas.getContext('2d');
+        this.container.appendChild(this.canvas);
+        
         this.tooltip = document.getElementById('tooltip');
+        this.themeManager = new ThemeManager();
         
-        // Map bounds (USA focused)
-        this.minLat = 24.0;  // South
-        this.maxLat = 50.0;  // North
-        this.minLng = -125.0; // West
-        this.maxLng = -66.0;  // East
+        // Map state
+        this.centerLat = 37.0902;
+        this.centerLng = -95.7129;
+        this.zoom = 5;
+        this.tileSize = 256; // Keep this for coordinate calculations
         
-        this.zoom = 1;
-        this.offsetX = 0;
-        this.offsetY = 0;
+        // Dragging state
+        this.isDragging = false;
+        this.lastX = 0;
+        this.lastY = 0;
+        
+        // Click marker
+        this.clickMarker = null;
         
         this.resize();
         this.setupEventListeners();
@@ -21,88 +79,127 @@ class SimpleMap {
     }
     
     resize() {
-        this.canvas.width = this.canvas.clientWidth;
-        this.canvas.height = this.canvas.clientHeight;
+        this.canvas.width = this.container.clientWidth;
+        this.canvas.height = this.container.clientHeight;
         this.draw();
     }
     
     setupEventListeners() {
         window.addEventListener('resize', () => this.resize());
         
-        this.canvas.addEventListener('click', (e) => this.handleClick(e));
-        this.canvas.addEventListener('mousemove', (e) => this.handleMouseMove(e));
-        this.canvas.addEventListener('mouseleave', () => {
-            this.tooltip.style.display = 'none';
-        });
-        
-        let isDragging = false;
-        let lastX, lastY;
-        
+        // Mouse events
         this.canvas.addEventListener('mousedown', (e) => {
-            isDragging = true;
-            lastX = e.clientX;
-            lastY = e.clientY;
+            this.isDragging = true;
+            this.lastX = e.clientX;
+            this.lastY = e.clientY;
+            this.canvas.style.cursor = 'grabbing';
         });
         
         this.canvas.addEventListener('mousemove', (e) => {
-            if (isDragging) {
-                const dx = e.clientX - lastX;
-                const dy = e.clientY - lastY;
-                this.offsetX += dx;
-                this.offsetY += dy;
-                lastX = e.clientX;
-                lastY = e.clientY;
+            if (this.isDragging) {
+                const dx = e.clientX - this.lastX;
+                const dy = e.clientY - this.lastY;
+                
+                // Update center based on drag
+                const scale = this.getScale();
+                this.centerLng -= dx / scale;
+                this.centerLat += dy / scale;
+                
+                this.lastX = e.clientX;
+                this.lastY = e.clientY;
                 this.draw();
+            } else {
+                // Check hover over markers
+                this.handleMouseMove(e);
             }
         });
         
         this.canvas.addEventListener('mouseup', () => {
-            isDragging = false;
+            this.isDragging = false;
+            this.canvas.style.cursor = 'default';
+        });
+        
+        this.canvas.addEventListener('mouseleave', () => {
+            this.isDragging = false;
+            this.canvas.style.cursor = 'default';
+            this.tooltip.style.display = 'none';
+        });
+        
+        this.canvas.addEventListener('click', (e) => {
+            if (!this.isDragging) {
+                this.handleClick(e);
+            }
+        });
+        
+        // Wheel zoom
+        this.canvas.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            const zoomDelta = e.deltaY > 0 ? -0.5 : 0.5;
+            this.zoom = Math.max(3, Math.min(10, this.zoom + zoomDelta));
+            this.draw();
         });
         
         // Zoom controls
         document.getElementById('zoom-in').addEventListener('click', () => {
-            this.zoom *= 1.3;
+            this.zoom = Math.min(10, this.zoom + 1);
             this.draw();
         });
         
         document.getElementById('zoom-out').addEventListener('click', () => {
-            this.zoom /= 1.3;
+            this.zoom = Math.max(3, this.zoom - 1);
             this.draw();
         });
         
         document.getElementById('reset').addEventListener('click', () => {
-            this.zoom = 1;
-            this.offsetX = 0;
-            this.offsetY = 0;
+            this.centerLat = 37.0902;
+            this.centerLng = -95.7129;
+            this.zoom = 5;
+            this.clickMarker = null;
             this.draw();
         });
     }
     
+    getScale() {
+        return this.tileSize * Math.pow(2, this.zoom) / 360;
+    }
+    
     latLngToPixel(lat, lng) {
-        const x = ((lng - this.minLng) / (this.maxLng - this.minLng)) * this.canvas.width;
-        const y = ((this.maxLat - lat) / (this.maxLat - this.minLat)) * this.canvas.height;
+        const scale = this.getScale();
         
-        // Apply zoom and offset
-        const centerX = this.canvas.width / 2;
-        const centerY = this.canvas.height / 2;
+        // Convert to Web Mercator
+        const x = (lng + 180) * scale;
+        const latRad = lat * Math.PI / 180;
+        const mercN = Math.log(Math.tan(Math.PI / 4 + latRad / 2));
+        const y = (180 - mercN * 180 / Math.PI) * scale;
         
-        const zoomedX = (x - centerX) * this.zoom + centerX + this.offsetX;
-        const zoomedY = (y - centerY) * this.zoom + centerY + this.offsetY;
+        // Offset by center
+        const centerX = (this.centerLng + 180) * scale;
+        const centerLatRad = this.centerLat * Math.PI / 180;
+        const centerMercN = Math.log(Math.tan(Math.PI / 4 + centerLatRad / 2));
+        const centerY = (180 - centerMercN * 180 / Math.PI) * scale;
         
-        return { x: zoomedX, y: zoomedY };
+        return {
+            x: this.canvas.width / 2 + (x - centerX),
+            y: this.canvas.height / 2 + (y - centerY)
+        };
     }
     
     pixelToLatLng(px, py) {
-        // Reverse the zoom and offset
-        const centerX = this.canvas.width / 2;
-        const centerY = this.canvas.height / 2;
+        const scale = this.getScale();
         
-        const x = (px - this.offsetX - centerX) / this.zoom + centerX;
-        const y = (py - this.offsetY - centerY) / this.zoom + centerY;
+        // Calculate center in pixels
+        const centerX = (this.centerLng + 180) * scale;
+        const centerLatRad = this.centerLat * Math.PI / 180;
+        const centerMercN = Math.log(Math.tan(Math.PI / 4 + centerLatRad / 2));
+        const centerY = (180 - centerMercN * 180 / Math.PI) * scale;
         
-        const lng = this.minLng + (x / this.canvas.width) * (this.maxLng - this.minLng);
-        const lat = this.maxLat - (y / this.canvas.height) * (this.maxLat - this.minLat);
+        // Calculate clicked point
+        const x = centerX + (px - this.canvas.width / 2);
+        const y = centerY + (py - this.canvas.height / 2);
+        
+        const lng = (x / scale) - 180;
+        const mercN = (180 - y / scale) * Math.PI / 180;
+        const lat = (Math.atan(Math.exp(mercN)) - Math.PI / 4) * 2 * 180 / Math.PI;
         
         return { lat, lng };
     }
@@ -111,88 +208,209 @@ class SimpleMap {
         // Clear canvas
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
         
-        // Draw background
-        this.ctx.fillStyle = '#e8f4f8';
+        // Draw background (ocean/water color)
+        const bgColor = this.themeManager.tileStyle === 'dark' ? '#0a1929' : '#a5c4d4';
+        this.ctx.fillStyle = bgColor;
         this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+        
+        // Draw land mass
+        this.drawLandMass();
         
         // Draw grid
         this.drawGrid();
         
-        // Draw state borders (simplified)
-        this.drawStateBorders();
+        // Draw state outlines
+        this.drawStateOutlines();
         
         // Draw In-N-Out locations
         this.drawLocations();
+        
+        // Draw click marker if exists
+        if (this.clickMarker) {
+            this.drawClickMarker();
+        }
+    }
+    
+    drawLandMass() {
+        // Draw USA land mass as a simplified polygon
+        const landColor = this.themeManager.tileStyle === 'dark' ? '#1e1e1e' : '#e8e6e1';
+        this.ctx.fillStyle = landColor;
+        
+        // Simplified US mainland boundary
+        const usMainland = [
+            { lat: 49, lng: -125 }, // Northwest
+            { lat: 49, lng: -95 },  // North central
+            { lat: 49, lng: -67 },  // Northeast
+            { lat: 45, lng: -67 },  // Maine
+            { lat: 41, lng: -70 },  // Cape Cod
+            { lat: 40, lng: -74 },  // NYC area
+            { lat: 37, lng: -76 },  // Chesapeake
+            { lat: 33, lng: -78 },  // Carolina coast
+            { lat: 30, lng: -81 },  // Florida
+            { lat: 25, lng: -80 },  // South Florida
+            { lat: 25, lng: -81 },  // Florida Keys
+            { lat: 28, lng: -83 },  // Tampa
+            { lat: 30, lng: -84 },  // Panhandle
+            { lat: 30, lng: -88 },  // Gulf coast
+            { lat: 29, lng: -95 },  // Houston
+            { lat: 26, lng: -97 },  // South Texas
+            { lat: 32, lng: -117 }, // San Diego
+            { lat: 34, lng: -120 }, // Santa Barbara
+            { lat: 38, lng: -123 }, // San Francisco
+            { lat: 42, lng: -124 }, // Oregon
+            { lat: 48, lng: -125 }, // Washington
+        ];
+        
+        this.ctx.beginPath();
+        const firstPoint = this.latLngToPixel(usMainland[0].lat, usMainland[0].lng);
+        this.ctx.moveTo(firstPoint.x, firstPoint.y);
+        
+        for (let i = 1; i < usMainland.length; i++) {
+            const point = this.latLngToPixel(usMainland[i].lat, usMainland[i].lng);
+            this.ctx.lineTo(point.x, point.y);
+        }
+        
+        this.ctx.closePath();
+        this.ctx.fill();
+        
+        // Draw Alaska (simplified)
+        const alaskaColor = this.themeManager.tileStyle === 'dark' ? '#2a2a2a' : '#f0f0f0';
+        this.ctx.fillStyle = alaskaColor;
+        const alaska = [
+            { lat: 71, lng: -156 },
+            { lat: 71, lng: -141 },
+            { lat: 60, lng: -141 },
+            { lat: 55, lng: -130 },
+            { lat: 60, lng: -165 },
+        ];
+        
+        this.ctx.beginPath();
+        const alaskaFirst = this.latLngToPixel(alaska[0].lat, alaska[0].lng);
+        this.ctx.moveTo(alaskaFirst.x, alaskaFirst.y);
+        
+        for (let i = 1; i < alaska.length; i++) {
+            const point = this.latLngToPixel(alaska[i].lat, alaska[i].lng);
+            this.ctx.lineTo(point.x, point.y);
+        }
+        
+        this.ctx.closePath();
+        this.ctx.fill();
     }
     
     drawGrid() {
-        this.ctx.strokeStyle = '#d0d0d0';
+        const gridColor = this.themeManager.tileStyle === 'dark' ? '#333333' : '#d0d0d0';
+        this.ctx.strokeStyle = gridColor;
         this.ctx.lineWidth = 0.5;
         
-        // Latitude lines
-        for (let lat = Math.ceil(this.minLat); lat <= this.maxLat; lat += 5) {
-            const start = this.latLngToPixel(lat, this.minLng);
-            const end = this.latLngToPixel(lat, this.maxLng);
-            
+        // Draw latitude lines every 5 degrees
+        for (let lat = 25; lat <= 50; lat += 5) {
             this.ctx.beginPath();
-            this.ctx.moveTo(start.x, start.y);
-            this.ctx.lineTo(end.x, end.y);
+            const startX = this.latLngToPixel(lat, -125);
+            const endX = this.latLngToPixel(lat, -65);
+            this.ctx.moveTo(startX.x, startX.y);
+            this.ctx.lineTo(endX.x, endX.y);
             this.ctx.stroke();
         }
         
-        // Longitude lines
-        for (let lng = Math.ceil(this.minLng); lng <= this.maxLng; lng += 5) {
-            const start = this.latLngToPixel(this.minLat, lng);
-            const end = this.latLngToPixel(this.maxLat, lng);
-            
+        // Draw longitude lines every 10 degrees
+        for (let lng = -120; lng <= -70; lng += 10) {
             this.ctx.beginPath();
-            this.ctx.moveTo(start.x, start.y);
-            this.ctx.lineTo(end.x, end.y);
+            const startY = this.latLngToPixel(50, lng);
+            const endY = this.latLngToPixel(24, lng);
+            this.ctx.moveTo(startY.x, startY.y);
+            this.ctx.lineTo(endY.x, endY.y);
             this.ctx.stroke();
         }
     }
     
-    drawStateBorders() {
-        // Simplified US outline
-        this.ctx.strokeStyle = '#999';
+    drawStateOutlines() {
+        const outlineColor = this.themeManager.tileStyle === 'dark' ? '#555555' : '#999999';
+        this.ctx.strokeStyle = outlineColor;
         this.ctx.lineWidth = 1;
         
-        // Draw a simple border around the map area
-        const nw = this.latLngToPixel(this.maxLat, this.minLng);
-        const ne = this.latLngToPixel(this.maxLat, this.maxLng);
-        const sw = this.latLngToPixel(this.minLat, this.minLng);
-        const se = this.latLngToPixel(this.minLat, this.maxLng);
+        // Draw major state boundaries (simplified)
+        const stateBorders = [
+            // California-Nevada
+            [{ lat: 42, lng: -120 }, { lat: 35, lng: -114.6 }],
+            // Nevada-Arizona
+            [{ lat: 37, lng: -114 }, { lat: 35, lng: -114 }],
+            // Arizona-New Mexico
+            [{ lat: 37, lng: -109 }, { lat: 31.5, lng: -109 }],
+            // Texas-New Mexico
+            [{ lat: 37, lng: -103 }, { lat: 32, lng: -103 }],
+            // Colorado boundaries
+            [{ lat: 41, lng: -109 }, { lat: 37, lng: -109 }],
+            [{ lat: 41, lng: -102 }, { lat: 37, lng: -102 }],
+        ];
         
-        this.ctx.beginPath();
-        this.ctx.moveTo(nw.x, nw.y);
-        this.ctx.lineTo(ne.x, ne.y);
-        this.ctx.lineTo(se.x, se.y);
-        this.ctx.lineTo(sw.x, sw.y);
-        this.ctx.closePath();
-        this.ctx.stroke();
+        stateBorders.forEach(border => {
+            this.ctx.beginPath();
+            const start = this.latLngToPixel(border[0].lat, border[0].lng);
+            const end = this.latLngToPixel(border[1].lat, border[1].lng);
+            this.ctx.moveTo(start.x, start.y);
+            this.ctx.lineTo(end.x, end.y);
+            this.ctx.stroke();
+        });
     }
+    
     
     drawLocations() {
         inNOutLocations.forEach(location => {
             const pos = this.latLngToPixel(location.lat, location.lng);
             
-            // Draw marker
-            this.ctx.fillStyle = '#c8102e';
-            this.ctx.strokeStyle = 'white';
-            this.ctx.lineWidth = 2;
-            
-            this.ctx.beginPath();
-            this.ctx.arc(pos.x, pos.y, 6 * this.zoom, 0, Math.PI * 2);
-            this.ctx.fill();
-            this.ctx.stroke();
-            
-            // Draw burger emoji
-            this.ctx.font = `${10 * this.zoom}px Arial`;
-            this.ctx.fillStyle = 'white';
-            this.ctx.textAlign = 'center';
-            this.ctx.textBaseline = 'middle';
-            this.ctx.fillText('🍔', pos.x, pos.y);
+            // Only draw if on screen
+            if (pos.x >= -20 && pos.x <= this.canvas.width + 20 &&
+                pos.y >= -20 && pos.y <= this.canvas.height + 20) {
+                
+                // Draw pin background
+                this.ctx.fillStyle = '#c8102e';
+                this.ctx.strokeStyle = 'white';
+                this.ctx.lineWidth = 2;
+                
+                this.ctx.beginPath();
+                this.ctx.arc(pos.x, pos.y, 8, 0, Math.PI * 2);
+                this.ctx.fill();
+                this.ctx.stroke();
+                
+                // Draw burger emoji
+                this.ctx.font = '16px Arial';
+                this.ctx.textAlign = 'center';
+                this.ctx.textBaseline = 'middle';
+                this.ctx.fillText('🍔', pos.x, pos.y);
+            }
         });
+    }
+    
+    drawClickMarker() {
+        const pos = this.latLngToPixel(this.clickMarker.lat, this.clickMarker.lng);
+        const color = this.getColorForTime(this.clickMarker.result.time);
+        
+        // Draw marker
+        this.ctx.fillStyle = color;
+        this.ctx.strokeStyle = 'white';
+        this.ctx.lineWidth = 3;
+        
+        this.ctx.beginPath();
+        this.ctx.arc(pos.x, pos.y, 10, 0, Math.PI * 2);
+        this.ctx.fill();
+        this.ctx.stroke();
+        
+        // Draw line to nearest location
+        const nearestPos = this.latLngToPixel(
+            this.clickMarker.result.location.lat,
+            this.clickMarker.result.location.lng
+        );
+        
+        this.ctx.strokeStyle = color;
+        this.ctx.lineWidth = 2;
+        this.ctx.setLineDash([10, 5]);
+        
+        this.ctx.beginPath();
+        this.ctx.moveTo(pos.x, pos.y);
+        this.ctx.lineTo(nearestPos.x, nearestPos.y);
+        this.ctx.stroke();
+        
+        this.ctx.setLineDash([]);
     }
     
     handleClick(e) {
@@ -206,37 +424,24 @@ class SimpleMap {
         const result = this.getNearestInNOut(lat, lng);
         
         if (result) {
-            // Draw marker at clicked location
+            this.clickMarker = { lat, lng, result };
             this.draw();
             
-            const clickPos = this.latLngToPixel(lat, lng);
-            const color = this.getColorForTime(result.time);
-            
-            this.ctx.fillStyle = color;
-            this.ctx.strokeStyle = '#333';
-            this.ctx.lineWidth = 2;
-            
-            this.ctx.beginPath();
-            this.ctx.arc(clickPos.x, clickPos.y, 8 * this.zoom, 0, Math.PI * 2);
-            this.ctx.fill();
-            this.ctx.stroke();
-            
-            // Draw line to nearest In-N-Out
-            const nearestPos = this.latLngToPixel(result.location.lat, result.location.lng);
-            
-            this.ctx.strokeStyle = color;
-            this.ctx.lineWidth = 2;
-            this.ctx.setLineDash([5, 5]);
-            
-            this.ctx.beginPath();
-            this.ctx.moveTo(clickPos.x, clickPos.y);
-            this.ctx.lineTo(nearestPos.x, nearestPos.y);
-            this.ctx.stroke();
-            
-            this.ctx.setLineDash([]);
-            
             // Show tooltip
-            this.showTooltip(e.clientX, e.clientY, result, lat, lng);
+            const html = `
+                <strong>Selected Location</strong><br>
+                Coordinates: ${lat.toFixed(4)}°, ${lng.toFixed(4)}°<br>
+                <br>
+                <strong>Nearest In-N-Out:</strong><br>
+                ${result.location.city}<br>
+                Distance: ${result.distance.toFixed(1)} miles<br>
+                Estimated Driving Time: ${this.formatTime(result.time)}
+            `;
+            
+            this.tooltip.innerHTML = html;
+            this.tooltip.style.left = (e.clientX + 15) + 'px';
+            this.tooltip.style.top = (e.clientY + 15) + 'px';
+            this.tooltip.style.display = 'block';
         }
     }
     
@@ -250,38 +455,26 @@ class SimpleMap {
             const pos = this.latLngToPixel(location.lat, location.lng);
             const dist = Math.sqrt((px - pos.x) ** 2 + (py - pos.y) ** 2);
             
-            if (dist < 10 * this.zoom) {
+            if (dist < 15) {
                 this.canvas.style.cursor = 'pointer';
-                this.showLocationTooltip(e.clientX, e.clientY, location);
+                this.tooltip.innerHTML = `<strong>In-N-Out Burger</strong><br>${location.city}`;
+                this.tooltip.style.left = (e.clientX + 15) + 'px';
+                this.tooltip.style.top = (e.clientY + 15) + 'px';
+                this.tooltip.style.display = 'block';
                 return;
             }
         }
         
-        this.canvas.style.cursor = 'crosshair';
+        // Only hide tooltip if not showing click result
+        if (!this.clickMarker) {
+            this.tooltip.style.display = 'none';
+        }
+        this.canvas.style.cursor = 'default';
     }
     
-    showLocationTooltip(x, y, location) {
-        this.tooltip.innerHTML = `<strong>In-N-Out Burger</strong><br>${location.city}`;
-        this.tooltip.style.left = (x + 15) + 'px';
-        this.tooltip.style.top = (y + 15) + 'px';
-        this.tooltip.style.display = 'block';
-    }
-    
-    showTooltip(x, y, result, lat, lng) {
-        const html = `
-            <strong>Selected Location</strong><br>
-            Coordinates: ${lat.toFixed(4)}°, ${lng.toFixed(4)}°<br>
-            <br>
-            <strong>Nearest In-N-Out:</strong><br>
-            ${result.location.city}<br>
-            Distance: ${result.distance.toFixed(1)} miles<br>
-            Estimated Driving Time: ${this.formatTime(result.time)}
-        `;
-        
-        this.tooltip.innerHTML = html;
-        this.tooltip.style.left = (x + 15) + 'px';
-        this.tooltip.style.top = (y + 15) + 'px';
-        this.tooltip.style.display = 'block';
+    updateTheme(theme) {
+        // Redraw with new theme colors
+        this.draw();
     }
     
     calculateDrivingDistance(lat1, lng1, lat2, lng2) {
@@ -348,7 +541,7 @@ class SimpleMap {
 
 // Initialize the map when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
-    const map = new SimpleMap('map-canvas');
+    window.inNOutMap = new SimpleMap('map');
     console.log('In-N-Out Desert Map loaded with', inNOutLocations.length, 'locations');
     console.log('Click anywhere on the map to see driving time to the nearest In-N-Out!');
 });

@@ -10,10 +10,18 @@
     <div id="header">
         <h1>🍔 In-N-Out Desert</h1>
         <p>See how far you are from the nearest In-N-Out Burger</p>
+        <div id="theme-selector">
+            <label for="theme-toggle">Theme:</label>
+            <select id="theme-toggle">
+                <option value="system">System</option>
+                <option value="light">Light</option>
+                <option value="dark">Dark</option>
+            </select>
+        </div>
     </div>
     
     <div id="map-container">
-        <canvas id="map-canvas"></canvas>
+        <div id="map"></div>
         <div id="tooltip"></div>
     </div>
     
