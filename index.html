@@ -10,6 +10,11 @@
     <div id="header">
         <h1>🍔 In-N-Out Desert</h1>
         <p>See how far you are from the nearest In-N-Out Burger</p>
+        <div id="search-container">
+            <input type="text" id="city-search" placeholder="Enter a city name (e.g., New York, NY)" />
+            <button id="search-button">Search</button>
+            <div id="search-result"></div>
+        </div>
         <div id="theme-selector">
             <label for="theme-toggle">Theme:</label>
             <select id="theme-toggle">
@@ -59,6 +64,7 @@
         <p>Click on the map to see the driving time to the nearest In-N-Out location</p>
     </div>
     
+    <script src="cities.js"></script>
     <script src="locations.js"></script>
     <script src="map.js"></script>
 </body>
