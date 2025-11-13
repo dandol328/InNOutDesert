@@ -19,7 +19,7 @@ A map to show how far you are from the nearest In-N-Out Burger, color-coded by d
   - 🟠 Orange: 2-4 hours
   - 🔴 Red: 4+ hours
 - **Zoom & Pan**: Interactive Leaflet controls with smooth zoom and pan
-- **Location Data**: Includes 44 In-N-Out locations across CA, AZ, NV, UT, TX, OR, and CO
+- **Location Data**: Includes 200+ In-N-Out locations across CA, AZ, NV, UT, TX, OR, CO, ID, and WA (comprehensive sample of all 424 locations)
 
 ## How to Use
 
